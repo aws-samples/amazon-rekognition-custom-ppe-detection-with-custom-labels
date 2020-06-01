@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "Email",
+    "ParameterValue": "yourname@email.com"
+  },
+  {
+    "ParameterKey": "PriceClass",
+    "ParameterValue": "Use Only U.S., Canada and Europe [PriceClass_100]"
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "name": "build-sri",
+  "version": "1.0.0",
+  "description": "post build to inject SRI integrity to index.html",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "glob": "^7.1.6",
+    "terser": "^4.7.0"
+  },
+  "scripts": {},
+  "author": "aws-specialist-sa-emea",
+  "license": "MIT-0",
+  "devDependencies": {}
+}

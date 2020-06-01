@@ -1,0 +1,22 @@
+{
+  "name": "custom-ppe-detection-image-utils",
+  "version": "1.0.0",
+  "description": "image utils layer",
+  "main": "index.js",
+  "private": true,
+  "author": "aws-specialist-sa-emea",
+  "license": "MIT-0",
+  "dependencies": {
+    "jimp": "^0.9.8"
+  },
+  "scripts": {
+    "pretest": "npm install",
+    "test": "echo \"image-utils layer wraps jimp, glob, and canvas, skipping unit test.\"",
+    "build:clean": "rm -rf dist && mkdir -p dist/nodejs/node_modules/image-utils",
+    "build:copy": "cp -r package.json index.js dist/nodejs/node_modules/image-utils",
+    "build:install": "cd dist/nodejs/node_modules/image-utils && npm install --production",
+    "build": "npm-run-all -s build:clean build:copy build:install",
+    "zip": "cd dist && zip -rq"
+  },
+  "devDependencies": {}
+}

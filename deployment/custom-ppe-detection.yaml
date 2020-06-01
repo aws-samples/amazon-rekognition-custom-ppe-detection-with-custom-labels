@@ -1,0 +1,1820 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: (Demo Purpose Only) Custom PPE Detection Demo - designed to demonstrate using a combination of Amazon Rekognition Label detection and Amazon Rekognition Custom Labels features to detect high visibility vest wearing.
+
+Mappings:
+    Solution:
+        Project:
+            Id: ML9800
+            LowerCaseId: ml9800
+            Version: "%VERSION%"
+        Template:
+            S3Bucket: "%BUCKET%"
+            KeyPrefix: "%KEYPREFIX%"
+            SingleRegion: "%SINGLE_REGION%"
+        Package:
+            CustomResourceX: "%PKG_CUSTOM_RESOURCES%"
+            Api: "%PKG_API%"
+            WebApp: "%PKG_WEBAPP%"
+        Layer:
+            ImageUtils: "%LAYER_IMAGEUTILS%"
+        APIGateway:
+            StageName: demo
+
+Parameters:
+    Email:
+        Type: String
+        Description: Email address of the user that will be created in the Amazon Cognito User Pool to access the demo portal.
+        AllowedPattern: '[^\s@]+@[^\s@]+\.[^\s@]+'
+    PriceClass:
+        Type: String
+        Description: Specify the price class of the edge location from which CloudFront serves your requests. For more information, see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/PriceClass.html
+        AllowedValues:
+            - Use Only U.S., Canada and Europe [PriceClass_100]
+            - Use U.S., Canada, Europe, Asia and Africa [PriceClass_200]
+            - Use All Edge Locations (Best Performance) [PriceClass_All]
+        Default: Use Only U.S., Canada and Europe [PriceClass_100]
+
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            -
+                Label:
+                    default: Amazon Cognito Configuration
+                Parameters:
+                    - Email
+            -
+                Label:
+                    default: Amazon S3 / Amazon CloudFront Configuration
+                Parameters:
+                    - PriceClass
+        ParameterLabels:
+            PriceClass:
+                default: Price Class
+            Email:
+                default: Email
+
+Conditions:
+    bSingleRegion: !Equals [
+        !FindInMap [
+            "Solution",
+            "Template",
+            "SingleRegion"
+        ],
+        "true"
+    ]
+    bUSEast1: !Equals [
+        !Ref "AWS::Region",
+        "us-east-1"
+    ]
+
+Resources:
+    ################################################################################
+    #
+    # CloudFormation Custom Resource lambda
+    # * Used during Stack create, update, and delete
+    #
+    ################################################################################
+    RoleCustomResource:
+        Type: AWS::IAM::Role
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W11
+                        reason: This wildcard is present as the custom resource lambda needs to be able to access contents within the bucket!
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action: "sts:AssumeRole"
+                        Principal:
+                            Service: "lambda.amazonaws.com"
+            Path: /
+            Policies:
+                -
+                    PolicyName: !Sub [
+                        "${x0}-${x1}-custom-ppe-detection-custom-resources", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Project",
+                                "LowerCaseId"
+                            ],
+                            x1: !Select [
+                                4,
+                                !Split [
+                                    "-",
+                                    !Select [
+                                        2,
+                                        !Split [
+                                            "/",
+                                            !Sub "${AWS::StackId}"
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        }
+                    ]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                        ## S3
+                        -
+                            Effect: "Allow"
+                            Action:
+                                - "s3:ListBucket"
+                                - "s3:GetBucketCORS"
+                                - "s3:PutBucketCORS"
+                            # This wildcard is present because of circular dependency where
+                            # the buckets aren't known before this custom resource lambda function
+                            # is created.
+                            Resource: !Sub [
+                                "arn:aws:s3:::${x0}-*", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Project",
+                                        "LowerCaseId"
+                                    ]
+                                }
+                            ]
+                        -
+                            Effect: "Allow"
+                            Action:
+                                - "s3:GetObject"
+                                - "s3:PutObject"
+                                - "s3:DeleteObject"
+                            # This wildcard is present because of circular dependency where
+                            # the buckets aren't known before this custom resource lambda function
+                            # is created.
+                            Resource: !Sub [
+                                "arn:aws:s3:::${x0}-*/*", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Project",
+                                        "LowerCaseId"
+                                    ]
+                                }
+                            ]
+                        -
+                            Effect: "Allow"
+                            Action: "s3:GetObject"
+                            Resource: !Sub [
+                                "arn:aws:s3:::${x0}/${x1}/${x2}", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Template",
+                                        "S3Bucket"
+                                    ],
+                                    x1: !FindInMap [
+                                        "Solution",
+                                        "Template",
+                                        "KeyPrefix"
+                                    ],
+                                    x2: !FindInMap [
+                                        "Solution",
+                                        "Package",
+                                        "WebApp"
+                                    ]
+                                }
+                            ]
+                        ## CloudWatch Logs
+                        -
+                            Effect: "Allow"
+                            Action:
+                                - "logs:CreateLogGroup"
+                                - "logs:CreateLogStream"
+                                - "logs:PutLogEvents"
+                            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+                        ## Cognito
+                        -
+                            Effect: "Allow"
+                            # permission to create/update/delete user
+                            Action:
+                                - "cognito-idp:AdminCreateUser"
+                                - "cognito-idp:AdminUpdateUserAttributes"
+                                - "cognito-idp:CreateGroup"
+                                - "cognito-idp:CreateUserPool"
+                                - "cognito-idp:CreateUserPoolClient"
+                                - "cognito-idp:DeleteGroup"
+                                - "cognito-idp:DeleteUserPool"
+                                - "cognito-idp:DeleteUserPoolClient"
+                                - "cognito-idp:DescribeUserPool"
+                                - "cognito-idp:DescribeUserPoolClient"
+                                - "cognito-idp:UpdateUserPool"
+                                - "cognito-idp:UpdateUserPoolClient"
+                            # This wildcard is present as cognito userpool yet to be created.
+                            Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+                        -
+                            Effect: "Allow"
+                            Action:
+                                - "cognito-idp:CreateUserPoolDomain"
+                                - "cognito-idp:DeleteUserPoolDomain"
+                                - "cognito-idp:DescribeUserPoolDomain"
+                            Resource: !Join ["", ["*"]]
+                        ## IAM
+                        -
+                            Effect: "Allow"
+                            # allow custom resource to pass IAM role during cognito.CreateGroup
+                            Action: "iam:PassRole"
+                            Resource: !Join ["", ["*"]]
+                        ## Rekognition
+                        -
+                            Effect: "Allow"
+                            Action: "rekognition:CreateProject"
+                            Resource: !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/*/*"
+
+    LambdaCustomResource:
+        Type: AWS::Lambda::Function
+        Properties:
+            Description: !Sub [
+                "(${x0}) custom ppe detection custom resources", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            Runtime: nodejs10.x
+            MemorySize: 256
+            Timeout: 900
+            Handler: index.handler
+            Role: !GetAtt RoleCustomResource.Arn
+            Code:
+                S3Bucket: !Sub [
+                    "${x0}${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "S3Bucket"
+                        ],
+                        x1: !If [
+                            bSingleRegion,
+                            "",
+                            !Sub "-${AWS::Region}"
+                        ]
+                    }
+                ]
+                S3Key: !Sub [
+                    "${x0}/${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "KeyPrefix"
+                        ],
+                        x1: !FindInMap [
+                            "Solution",
+                            "Package",
+                            "CustomResourceX"
+                        ]
+                    }
+                ]
+
+    ################################################################################
+    #
+    # (Custom Resource) Amazon Rekognition Custom Labels project
+    #  Description: Create Amazon Rekognition Custom Labels Project
+    #              during stack creation.
+    #  Returns:
+    #    * Name
+    #    * Arn
+    ################################################################################
+    CreateCustomLabelsProject:
+        Type: Custom::CreateCustomLabelsProject
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Data:
+                ProjectName: !Sub [
+                    "${x0}-${x1}-custom-ppe-detection", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Project",
+                            "LowerCaseId"
+                        ],
+                        x1: !Select [
+                            4,
+                            !Split [
+                                "-",
+                                !Select [
+                                    2,
+                                    !Split [
+                                        "/",
+                                        !Sub "${AWS::StackId}"
+                                    ]
+                                ]
+                            ]
+                        ]
+                    }
+                ]
+
+    ################################################################################
+    #
+    # Bucket resources
+    # * Logs and Source (to store training and processing images)
+    #
+    ################################################################################
+    BucketLogs:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        UpdateReplacePolicy: Retain
+        Properties:
+            BucketName: !Sub [
+                "${x0}-${x1}-${AWS::Region}-logs", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    -
+                      ServerSideEncryptionByDefault:
+                          SSEAlgorithm: AES256
+            AccessControl: LogDeliveryWrite
+            LoggingConfiguration:
+                DestinationBucketName: !Sub [
+                    "${x0}-${x1}-${AWS::Region}-logs", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Project",
+                            "LowerCaseId"
+                        ],
+                        x1: !Select [
+                            4,
+                            !Split [
+                                "-",
+                                !Select [
+                                    2,
+                                    !Split [
+                                        "/",
+                                        !Sub "${AWS::StackId}"
+                                    ]
+                                ]
+                            ]
+                        ]
+                    }
+                ]
+                LogFilePrefix: "access_logs/"
+            LifecycleConfiguration:
+                Rules:
+                    -
+                        Id: Keep access logs for 30 days
+                        Status: Enabled
+                        Prefix: /
+                        ExpirationInDays: 30
+                        AbortIncompleteMultipartUpload:
+                            DaysAfterInitiation: 1
+            Tags:
+                -
+                    Key: SolutionId
+                    Value: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+            VersioningConfiguration:
+                Status: Enabled
+
+    BucketPolicyLogs:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref BucketLogs
+            PolicyDocument:
+                Statement:
+                    -
+                        Effect: Deny
+                        Principal: "*"
+                        Action: "*"
+                        Resource: !Sub "arn:aws:s3:::${BucketLogs}/*"
+                        Condition:
+                            Bool:
+                                "aws:SecureTransport": false
+
+    BucketSource:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        UpdateReplacePolicy: Retain
+        Properties:
+            BucketName: !Sub [
+                "${x0}-${x1}-${AWS::Region}-source", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    -
+                      ServerSideEncryptionByDefault:
+                          SSEAlgorithm: AES256
+            AccelerateConfiguration:
+                AccelerationStatus: Enabled
+            AccessControl: LogDeliveryWrite
+            LoggingConfiguration:
+                DestinationBucketName: !Ref BucketLogs
+                LogFilePrefix: "access_logs_source_bucket/"
+            CorsConfiguration:
+                CorsRules:
+                    -
+                        AllowedMethods:
+                            - HEAD
+                            - GET
+                            - PUT
+                            - POST
+                        AllowedOrigins:
+                            - "*"
+                        AllowedHeaders:
+                            - "*"
+                        ExposedHeaders:
+                            - ETag
+                            - "Content-Length"
+                        MaxAge: 3000
+            LifecycleConfiguration:
+                Rules:
+                    -
+                        Id: Use Intelligent tier
+                        Status: Enabled
+                        Transitions:
+                            -
+                                StorageClass: INTELLIGENT_TIERING
+                                TransitionInDays: 0
+                        AbortIncompleteMultipartUpload:
+                            DaysAfterInitiation: 7
+                    -
+                        Id: Keep previous version for 7 days
+                        Status: Enabled
+                        NoncurrentVersionExpirationInDays: 7
+                        AbortIncompleteMultipartUpload:
+                            DaysAfterInitiation: 1
+            Tags:
+                -
+                    Key: SolutionId
+                    Value: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+            VersioningConfiguration:
+                Status: Enabled
+
+    BucketPolicySource:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref BucketSource
+            PolicyDocument:
+                Statement:
+                    -
+                        Effect: Deny
+                        Principal: "*"
+                        Action: "*"
+                        Resource: !Sub "arn:aws:s3:::${BucketSource}/*"
+                        Condition:
+                            Bool:
+                                "aws:SecureTransport": false
+                    # Amazon Rekognition Custom Labels specific
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service: "rekognition.amazonaws.com"
+                        Action:
+                            - "s3:GetBucketAcl"
+                            - "s3:GetBucketLocation"
+                        Resource: !Sub "arn:aws:s3:::${BucketSource}"
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service: "rekognition.amazonaws.com"
+                        Action:
+                            - "s3:GetObject"
+                            - "s3:GetObjectAcl"
+                            - "s3:GetObjectVersion"
+                            - "s3:GetObjectTagging"
+                        Resource: !Sub "arn:aws:s3:::${BucketSource}/*"
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service: "rekognition.amazonaws.com"
+                        Action: "s3:PutObject"
+                        Resource: !Sub "arn:aws:s3:::${BucketSource}/*"
+                        Condition:
+                            StringEquals:
+                                "s3:x-amz-acl": "bucket-owner-full-control"
+
+
+    ################################################################################
+    #
+    # API Gateway resources
+    # * IAM roles, Lambda, API Access Logs, RESTful API endpoint, and API Deployment
+    #
+    ################################################################################
+    RoleApi:
+        Type: AWS::IAM::Role
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W11
+                        reason: "This wildcard is present as the custom resource lambda needs to be able to access contents within the bucket!"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Action: "sts:AssumeRole"
+                        Principal:
+                            Service: "lambda.amazonaws.com"
+            Path: /
+            Policies:
+                -
+                    PolicyName: !Sub [
+                        "${x0}-${x1}-custom-ppe-detection-api", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Project",
+                                "LowerCaseId"
+                            ],
+                            x1: !Select [
+                                4,
+                                !Split [
+                                    "-",
+                                    !Select [
+                                        2,
+                                        !Split [
+                                            "/",
+                                            !Sub "${AWS::StackId}"
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        }
+                    ]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            ## CloudWatch Logs
+                            -
+                                Effect: "Allow"
+                                Action:
+                                    - "logs:CreateLogGroup"
+                                    - "logs:CreateLogStream"
+                                    - "logs:PutLogEvents"
+                                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+                            ## S3
+                            -
+                                Effect: Allow
+                                ## note: Custom Labels requires this.
+                                Action: "s3:ListAllMyBuckets"
+                                Resource: "arn:aws:s3:::*"
+                            -
+                                Effect: Allow
+                                Action: "s3:ListBucket"
+                                Resource: !Sub "arn:aws:s3:::${BucketSource}"
+                            -
+                                Effect: Allow
+                                Action:
+                                    - "s3:GetObject"
+                                    - "s3:GetObjectAcl"
+                                    - "s3:GetObjectVersion"
+                                    - "s3:GetObjectTagging"
+                                    - "s3:PutObject"
+                                Resource: !Sub "arn:aws:s3:::${BucketSource}/*"
+                            ## Rekognition
+                            -
+                                Effect: Allow
+                                Action: "rekognition:DetectLabels"
+                                Resource: "*"
+                            -
+                                Effect: Allow
+                                Action: "rekognition:DetectCustomLabels"
+                                Resource: !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${CreateCustomLabelsProject.Name}/version/*/*"
+                            -
+                                Effect: Allow
+                                Action: "rekognition:CreateProjectVersion"
+                                Resource:
+                                    - !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${CreateCustomLabelsProject.Name}/*"
+                                    - !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${CreateCustomLabelsProject.Name}/version/*/*"
+                            -
+                                Effect: Allow
+                                Action: "rekognition:DescribeProjects"
+                                Resource: "*"
+                            -
+                                Effect: Allow
+                                Action: "rekognition:DescribeProjectVersions"
+                                Resource: !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${CreateCustomLabelsProject.Name}/*"
+                            -
+                                Effect: Allow
+                                Action:
+                                    - "rekognition:StartProjectVersion"
+                                    - "rekognition:StopProjectVersion"
+                                Resource: !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${CreateCustomLabelsProject.Name}/version/*/*"
+
+    LayerImageUtils:
+        Type: AWS::Lambda::LayerVersion
+        Properties:
+            LayerName: !Sub [
+                "${x0}-${x1}-layer-imageutils", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            CompatibleRuntimes:
+                - nodejs10.x
+            Content:
+                S3Bucket: !Sub [
+                    "${x0}${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "S3Bucket"
+                        ],
+                        x1: !If [
+                            bSingleRegion,
+                            "",
+                            !Sub "-${AWS::Region}"
+                        ]
+                    }
+                ]
+                S3Key: !Sub [
+                    "${x0}/${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "KeyPrefix"
+                        ],
+                        x1: !FindInMap [
+                            "Solution",
+                            "Layer",
+                            "ImageUtils"
+                        ]
+                    }
+                ]
+            Description: !Sub [
+                "${x0} ${AWS::StackName} image utils layer", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            LicenseInfo: Apache-2.0
+
+    LambdaApi:
+        Type: AWS::Lambda::Function
+        Properties:
+            FunctionName: !Sub [
+                "${x0}-${x1}-custom-ppe-detection-api", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            Description: !Sub [
+                "(${x0}) Handle POST requests", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            Runtime: nodejs10.x
+            MemorySize: 1024
+            Timeout: 900
+            Handler: index.handler
+            Role: !GetAtt RoleApi.Arn
+            Code:
+                S3Bucket: !Sub [
+                    "${x0}${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "S3Bucket"
+                        ],
+                        x1: !If [
+                            bSingleRegion,
+                            "",
+                            !Sub "-${AWS::Region}"
+                        ]
+                    }
+                ]
+                S3Key: !Sub [
+                    "${x0}/${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "KeyPrefix"
+                        ],
+                        x1: !FindInMap [
+                            "Solution",
+                            "Package",
+                            "Api"
+                        ]
+                    }
+                ]
+            Layers:
+                - !Ref LayerImageUtils
+
+    LambdaApiSmall:
+        Type: AWS::Lambda::Function
+        Properties:
+            FunctionName: !Sub [
+                "${x0}-${x1}-custom-ppe-detection-api-small", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            Description: !Sub [
+                "(${x0}) Handle OPTIONS and GET requests", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            Runtime: nodejs10.x
+            MemorySize: 256
+            Timeout: 900
+            Handler: index.handler
+            Role: !GetAtt RoleApi.Arn
+            Code:
+                S3Bucket: !Sub [
+                    "${x0}${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "S3Bucket"
+                        ],
+                        x1: !If [
+                            bSingleRegion,
+                            "",
+                            !Sub "-${AWS::Region}"
+                        ]
+                    }
+                ]
+                S3Key: !Sub [
+                    "${x0}/${x1}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Template",
+                            "KeyPrefix"
+                        ],
+                        x1: !FindInMap [
+                            "Solution",
+                            "Package",
+                            "Api"
+                        ]
+                    }
+                ]
+            Layers:
+                - !Ref LayerImageUtils
+
+    RoleApiErrorLog:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service: "apigateway.amazonaws.com"
+                        Action: "sts:AssumeRole"
+            Path: /
+            ManagedPolicyArns:
+                - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+    ApiAccount:
+        Type: AWS::ApiGateway::Account
+        Properties:
+            CloudWatchRoleArn: !GetAtt RoleApiErrorLog.Arn
+
+    RestApi:
+        Type: AWS::ApiGateway::RestApi
+        Properties:
+            Description: !Sub [
+                "(${x0}) RESTful API endpoints to create, train, start, & stop Custom Labels projects", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            Body:
+                swagger: "2.0"
+                info:
+                    version: "2018-08-03T20:13:00Z"
+                    title: !Sub [
+                        "${x0}-custom-ppe-detection-api", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Project",
+                                "LowerCaseId"
+                            ]
+                        }
+                    ]
+                basePath: !Sub [
+                    "/${x0}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "APIGateway",
+                            "StageName"
+                        ]
+                    }
+                ]
+                schemes:
+                    - "https"
+                paths:
+                    /{operation}:
+                        options:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "operation"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            response:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                                    headers:
+                                        Access-Control-Allow-Origin:
+                                            type: "string"
+                                        Access-Control-Allow-Methods:
+                                            type: "string"
+                                        Access-Control-Allow-Headers:
+                                            type: "string"
+                            x-amazon-apigateway-integration:
+                                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaApiSmall.Arn}/invocations"
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                        get:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "operation"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            response:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - sigv4: []
+                            x-amazon-apigateway-integration:
+                                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaApiSmall.Arn}/invocations"
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                        post:
+                            produces:
+                                - "application/json"
+                            parameters:
+                                -
+                                    name: "operation"
+                                    in: "path"
+                                    required: true
+                                    type: "string"
+                            response:
+                                "200":
+                                    description: "200 response"
+                                    schema:
+                                        $ref: "#/definitions/Empty"
+                            security:
+                                - sigv4: []
+                            x-amazon-apigateway-integration:
+                                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaApi.Arn}/invocations"
+                                responses:
+                                    default:
+                                        statusCode: "200"
+                                passthroughBehavior: "when_no_match"
+                                httpMethod: "POST"
+                                contentHandling: "CONVERT_TO_TEXT"
+                                type: "aws_proxy"
+                securityDefinitions:
+                    sigv4:
+                        type: "apiKey"
+                        name: "Authorization"
+                        in: "header"
+                        x-amazon-apigateway-authtype: "awsSigv4"
+                definitions:
+                    Empty:
+                        type: "object"
+                        title: "Empty Schema"
+
+    Deployment:
+        Type: AWS::ApiGateway::Deployment
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W68
+                        reason: Supress UsagePlan requirement
+        Properties:
+            Description: !Sub [
+                "(${x0}) created by ${AWS::StackName}", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            RestApiId: !Ref RestApi
+            StageName: !FindInMap [
+                "Solution",
+                "APIGateway",
+                "StageName"
+            ]
+            StageDescription:
+                Description: !Sub [
+                    "(${x0}) created by ${AWS::StackName}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "Project",
+                            "LowerCaseId"
+                        ]
+                    }
+                ]
+                LoggingLevel: ERROR
+                AccessLogSetting:
+                    DestinationArn: !Sub [
+                        "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/apigateway/access-logs/${x0}/${RestApi}", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Project",
+                                "LowerCaseId"
+                            ]
+                        }
+                    ]
+                    Format: "$context.identity.sourceIp $context.identity.caller $context.identity.user [$context.requestTime] \"$context.httpMethod $context.resourcePath $context.protocol\" $context.status $context.responseLength $context.requestId"
+                MethodSettings:
+                    -
+                        ResourcePath: /~1{operation}
+                        HttpMethod: GET
+                        DataTraceEnabled: true
+                        LoggingLevel: ERROR
+                    -
+                        ResourcePath: /~1{operation}
+                        HttpMethod: POST
+                        DataTraceEnabled: true
+                        LoggingLevel: ERROR
+
+    OPTIONSOperation:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: lambda:InvokeFunction
+            FunctionName: !GetAtt LambdaApiSmall.Arn
+            Principal: apigateway.amazonaws.com
+            SourceArn: !Sub [
+                "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${x0}/OPTIONS/*", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "APIGateway",
+                        "StageName"
+                    ]
+                }
+            ]
+
+    GETOperation:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: lambda:InvokeFunction
+            FunctionName: !GetAtt LambdaApiSmall.Arn
+            Principal: apigateway.amazonaws.com
+            SourceArn: !Sub [
+                "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${x0}/GET/*", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "APIGateway",
+                        "StageName"
+                    ]
+                }
+            ]
+
+    POSTOperation:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: lambda:InvokeFunction
+            FunctionName: !GetAtt LambdaApi.Arn
+            Principal: apigateway.amazonaws.com
+            SourceArn: !Sub [
+                "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${x0}/POST/*", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "APIGateway",
+                        "StageName"
+                    ]
+                }
+            ]
+
+
+    ################################################################################
+    #
+    # Webapp resources
+    # * S3 Bucket to host web application, Amazon CloudFront distribution with OAID
+    # * Custom Resource to copy web contents
+    #
+    ################################################################################
+    BucketWeb:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        UpdateReplacePolicy: Retain
+        Properties:
+            BucketName: !Sub [
+                "${x0}-${x1}-${AWS::Region}-web", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ],
+                    x1: !Select [
+                        4,
+                        !Split [
+                            "-",
+                            !Select [
+                                2,
+                                !Split [
+                                    "/",
+                                    !Sub "${AWS::StackId}"
+                                ]
+                            ]
+                        ]
+                    ]
+                }
+            ]
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    -
+                      ServerSideEncryptionByDefault:
+                          SSEAlgorithm: AES256
+            AccessControl: LogDeliveryWrite
+            LoggingConfiguration:
+                DestinationBucketName: !Ref BucketLogs
+                LogFilePrefix: "access_logs_web_bucket/"
+            WebsiteConfiguration:
+                IndexDocument: index.html
+                ErrorDocument: index.html
+            CorsConfiguration:
+                CorsRules:
+                    -
+                        AllowedMethods:
+                            - "GET"
+                            - "PUT"
+                            - "POST"
+                            - "HEAD"
+                        AllowedOrigins:
+                            - "*"
+                        AllowedHeaders:
+                            - "*"
+                        ExposedHeaders:
+                            - "ETag"
+                            - "Content-Length"
+                        MaxAge: 3000
+            LifecycleConfiguration:
+                Rules:
+                    -
+                        Id: "Use Intelligent tier"
+                        Status: Enabled
+                        Transitions:
+                            -
+                                StorageClass: INTELLIGENT_TIERING
+                                TransitionInDays: 0
+                        AbortIncompleteMultipartUpload:
+                            DaysAfterInitiation: 7
+                    -
+                        Id: "Keep previous version for 7 days"
+                        Status: Enabled
+                        NoncurrentVersionExpirationInDays: 7
+                        AbortIncompleteMultipartUpload:
+                            DaysAfterInitiation: 1
+            Tags:
+                -
+                    Key: SolutionId
+                    Value: !FindInMap ["Solution", "Project", "LowerCaseId"]
+            VersioningConfiguration:
+                Status: Enabled
+
+    OriginAccessIdentity:
+        Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+        Properties:
+            CloudFrontOriginAccessIdentityConfig:
+                Comment: !Sub "access-identity-${BucketWeb}"
+
+    BucketPolicyWeb:
+        Type: AWS::S3::BucketPolicy
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: F16
+                        reason: "website bucket policy requires a wildcard principal"
+        Properties:
+            Bucket: !Ref BucketWeb
+            PolicyDocument:
+                Statement:
+                    -
+                        Effect: Deny
+                        Principal: "*"
+                        Action: "*"
+                        Resource: !Sub "arn:aws:s3:::${BucketWeb}/*"
+                        Condition:
+                            Bool:
+                                "aws:SecureTransport": false
+                    -
+                        Effect: Allow
+                        Action: "s3:GetObject"
+                        Resource: !Sub "arn:aws:s3:::${BucketWeb}/*"
+                        Principal:
+                            CanonicalUser: !GetAtt OriginAccessIdentity.S3CanonicalUserId
+
+    # (Custom Resource) copy web content to web bucket
+    # Returns:
+    #   * Uploaded
+    #   * LastUpdated
+    #   * Status
+    CopyWebContent:
+        Type: Custom::CopyWebContent
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Data:
+                SolutionId: !FindInMap [
+                    "Solution",
+                    "Project",
+                    "LowerCaseId"
+                ]
+                Source:
+                    Bucket: !Sub [
+                        "${x0}${x1}", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Template",
+                                "S3Bucket"
+                            ],
+                            x1: !If [
+                                bSingleRegion,
+                                "",
+                                !Sub "-${AWS::Region}"
+                            ]
+                        }
+                    ]
+                    Key: !Sub [
+                        "${x0}/${x1}", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Template",
+                                "KeyPrefix"
+                            ],
+                            x1: !FindInMap [
+                                "Solution",
+                                "Package",
+                                "WebApp"
+                            ]
+                        }
+                    ]
+                Destination:
+                    Bucket: !Ref BucketWeb
+
+    CloudFrontDistribution:
+        Type: AWS::CloudFront::Distribution
+        Properties:
+            DistributionConfig:
+                Comment: "Webapp distribution for custom ppe detection demo"
+                Origins:
+                    -
+                        Id: !Sub "S3-${BucketWeb}"
+                        DomainName: !If [
+                            bUSEast1,
+                            !Sub "${BucketWeb}.s3.amazonaws.com",
+                            !Sub "${BucketWeb}.s3.${AWS::Region}.amazonaws.com"
+                        ]
+                        S3OriginConfig:
+                            OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${OriginAccessIdentity}"
+                DefaultCacheBehavior:
+                    TargetOriginId: !Sub "S3-${BucketWeb}"
+                    AllowedMethods:
+                        - OPTIONS
+                        - HEAD
+                        - GET
+                    CachedMethods:
+                        - OPTIONS
+                        - HEAD
+                        - GET
+                    ForwardedValues:
+                        QueryString: false
+                    ViewerProtocolPolicy: redirect-to-https
+                DefaultRootObject: index.html
+                CustomErrorResponses:
+                    -
+                        ErrorCode: 403
+                        ResponsePagePath: /index.html
+                        ResponseCode: 200
+                    -
+                        ErrorCode: 404
+                        ResponsePagePath: /index.html
+                        ResponseCode: 200
+                IPV6Enabled: true
+                ViewerCertificate:
+                    CloudFrontDefaultCertificate: true
+                Enabled: true
+                HttpVersion: http2
+                PriceClass: !Select [
+                    0,
+                    !Split [
+                        "]",
+                        !Select [
+                            1,
+                            !Split [
+                                "[",
+                                !Ref PriceClass
+                            ]
+                        ]
+                    ]
+                ]
+                Logging:
+                    Bucket: !Sub "${BucketLogs}.s3.amazonaws.com"
+                    Prefix: access_logs_cloudfront/
+                    IncludeCookies: true
+
+    # (Custom Resource) to copy webapp to web bucket
+    # Returns:
+    #   * Status
+    PostUpdateBucketWebCORS:
+        Type: Custom::PostUpdateBucketCORS
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Data:
+                Bucket: !Ref BucketWeb
+                AllowedOrigins:
+                    - !Sub "https://${CloudFrontDistribution.DomainName}"
+                AllowedMethods:
+                    - HEAD
+                    - GET
+                    - PUT
+                    - POST
+                AllowedHeaders:
+                    - "*"
+                ExposeHeaders:
+                    - Content-Length
+                    - ETag
+                MaxAgeSeconds: 3000
+
+    # (Custom Resource) update source bucket CORS
+    # Returns:
+    #   * Status
+    PostUpdateBucketSourceCORS:
+        Type: Custom::PostUpdateBucketCORS
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Data:
+                Bucket: !Ref BucketSource
+                AllowedOrigins:
+                    - !Sub "https://${CloudFrontDistribution.DomainName}"
+                AllowedMethods:
+                    - HEAD
+                    - GET
+                    - PUT
+                    - POST
+                AllowedHeaders:
+                    - "*"
+                ExposeHeaders:
+                    - Content-Length
+                    - ETag
+                MaxAgeSeconds: 3000
+
+    # (Custom Resource) create solution manifest for webapp
+    # Returns:
+    #   * Status
+    PostCreateSolutionManifest:
+        Type: Custom::PostCreateSolutionManifest
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Web:
+                Bucket: !Ref BucketWeb
+            Data:
+                SolutionId: !FindInMap [
+                    "Solution",
+                    "Project",
+                    "LowerCaseId"
+                ]
+                Version: !FindInMap [
+                    "Solution",
+                    "Project",
+                    "Version"
+                ]
+                StackName: !Sub "${AWS::StackName}"
+                Region: !Sub "${AWS::Region}"
+                LastUpdated: !GetAtt CopyWebContent.LastUpdated
+                S3:
+                    Bucket: !Ref BucketSource
+                    UseAccelerateEndpoint: true
+                ApiEndpoint: !Sub [
+                    "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${x0}", {
+                        x0: !FindInMap [
+                            "Solution",
+                            "APIGateway",
+                            "StageName"
+                        ]
+                    }
+                ]
+                Cognito:
+                    UserPoolId: !Ref CognitoUserPool
+                    ClientId: !Ref CognitoAppClient
+                    IdentityPoolId: !Ref CognitoIdentityPool
+                    RedirectUri: !Sub "https://${CloudFrontDistribution.DomainName}"
+                CustomLabels:
+                    Project:
+                        Name: !GetAtt CreateCustomLabelsProject.Name
+                        Arn: !GetAtt CreateCustomLabelsProject.Arn
+
+
+    ################################################################################
+    #
+    # Cognito resources
+    # * Authenticated User IAM role, UserPool, IdentityPool, AppClient, register user
+    #
+    ################################################################################
+    CognitoUserPool:
+        Type: AWS::Cognito::UserPool
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: F78
+                        reason: "Disable MFA check"
+        Properties:
+            AdminCreateUserConfig:
+                AllowAdminCreateUserOnly: true
+                InviteMessageTemplate:
+                  EmailSubject: "You are invited to AWS Custom PPE Detection Demo portal (GitHub sample code project)"
+                  EmailMessage:
+                    !Sub
+                        - |-
+                            <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schema=s-microsoft-com:office:word" xmlns:m="http://schemas.microsoft.com/office/2004/12/omml" xmlns="http://www.w3.org/TR/REC-html40">
+                            <head>
+                            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+                            <meta name="Generator" content="Microsoft Word 15 (filtered medium)">
+                            <style>
+                                @font-face {
+                                font-family: "Cambria Math"; panose-1: 2 4 5 3 5 4 6 3 2 4;
+                                }
+                                @font-face {
+                                font-family: DengXian; panose-1: 2 1 6 0 3 1 1 1 1 1;
+                                }
+                                @font-face {
+                                font-family: Calibri; panose-1: 2 15 5 2 2 2 4 3 2 4;
+                                }
+                                @font-face {
+                                font-family: "@DengXian"; panose-1: 2 1 6 0 3 1 1 1 1 1;
+                                }
+                                @font-face {
+                                font-family: "Amazon Ember"; panose-1: 2 11 6 3 2 2 4 2 2 4;
+                                }
+
+                                p.MsoNormal, li.MsoNormal, div.MsoNormal {
+                                margin: 0in;
+                                margin-bottom: .0001pt;
+                                font-size: 12.0pt;
+                                font-family: "Calibri", sans-serif;
+                                }
+
+                                h2 {
+                                mso-style-priority: 9;
+                                mso-style-link: "Heading 2 Char";
+                                mso-margin-top-alt: auto;
+                                margin-right: 0in;
+                                mso-margin-bottom-alt: auto;
+                                margin-left: 0in;
+                                font-size: 18.0pt;
+                                font-family: "Calibri", sans-serif;
+                                font-weight: bold;
+                                }
+
+                                a, span.MsoHyperlink {
+                                mso-style-priority: 99;
+                                color: #0563C1;
+                                }
+
+                                span.EmailStyle17 {
+                                mso-style-type: personal-compose;
+                                font-family: "Calibri", sans-serif;
+                                color: windowtext;
+                                }
+
+                                span.Heading2Char {
+                                mso-style-name: "Heading 2 Char";
+                                mso-style-priority: 9;
+                                mso-style-link: "Heading 2";
+                                font-family: "Calibri", sans-serif;
+                                font-weight: bold;
+                                }
+
+                                .MsoChpDefault {
+                                mso-style-type: export-only;
+                                font-family: "Calibri", sans-serif;
+                                }
+
+                                @page WordSection1 {
+                                size: 8.5in 11.0in;
+                                margin: 1.0in 1.0in 1.0in 1.0in;
+                                }
+
+                                div.WordSection1 {
+                                page: WordSection1;
+                                }
+
+                                .MainContent {
+                                font-variant-ligatures: normal;
+                                font-variant-caps: normal;
+                                orphans:2;
+                                text-align:start;
+                                widows:2;
+                                -webkit-text-stroke-width: 0px;
+                                text-decoration-style:initial;
+                                text-decoration-color:initial;
+                                word-spacing:0px;
+                                font-size:13.5pt;
+                                }
+
+                                .SubContent {
+                                font-family:'Amazon Ember',sans-serif;
+                                color:#333333"
+                                }
+                            </style>
+                            </head>
+
+                            <body lang="EN-US" link="#0563C1" vlink="#954F72">
+                            <div class="WordSection1">
+                                <h2>
+                                <span class="SubContent">
+                                    Welcome to AWS Custom PPE Detection Demo portal (GitHub sample code project)<o:p></o:p>
+                                </span>
+                                </h2>
+
+                                <p class="MainContent" style="padding-bottom:30px;">
+                                <span class="SubContent">
+                                    Use the provided user name and temporary password to log in for the first time.<o:p></o:p>
+                                </span>
+                                </p>
+
+                                <p class="MainContent">
+                                <span class="SubContent">
+                                    User name: <b>{username}</b><o:p></o:p>
+                                </span>
+                                </p>
+
+                                <p class="MainContent">
+                                <span class="SubContent">
+                                    Temporary password: <b>{####}</b><o:p></o:p>
+                                </span>
+                                <br/>
+                                <span class="SubContent" style="font-size:10pt;">
+                                    (After you log in with your temporary password, you will be prompted to create a new one.)<o:p></o:p>
+                                </span>
+                                </p>
+
+                                <p class="MainContent" style="padding-bottom:30px;">
+                                <span class="SubContent">
+                                    Open the link to log in:<o:p></o:p>
+                                    <br/>
+                                    <span style="color:#007DBC">
+                                        <a href="${url}" target="_blank">${url}</a><o:p></o:p>
+                                    </span>
+                                </span>
+                                </p>
+
+                                <p class="MainContent" style="padding-top: 30pt;">
+                                <span class="SubContent" style="font-size:12pt;">
+                                    <i>Team AWS Specialist AI/ML</i><o:p></o:p>
+                                </span>
+                                </p>
+
+                                <p class="MsoNormal">
+                                <span style="font-size:11.0pt">
+                                    <o:p>&nbsp;</o:p>
+                                </span>
+                                </p>
+                            </div>
+                            </body>
+                            </html>
+                        - {
+                            url: !Sub "https://${CloudFrontDistribution.DomainName}",
+                        }
+            AliasAttributes:
+                - email
+            AutoVerifiedAttributes:
+                - email
+            MfaConfiguration: 'OFF'
+            Policies:
+                PasswordPolicy:
+                    MinimumLength: 8
+                    RequireLowercase: true
+                    RequireNumbers: true
+                    RequireSymbols: false
+                    RequireUppercase: true
+            UserPoolName: !Sub [
+                "${x0}-custom-ppe-detection-userpool", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+
+    CognitoAppClient:
+        Type: AWS::Cognito::UserPoolClient
+        Properties:
+            ClientName: !Sub [
+                "${x0}-custom-ppe-detection-appclient", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            RefreshTokenValidity: 30
+            UserPoolId: !Ref CognitoUserPool
+
+    CognitoIdentityPool:
+        Type: AWS::Cognito::IdentityPool
+        Properties:
+            IdentityPoolName: !Sub [
+                "${x0}_custom_ppe_detection_identity_pool", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
+            AllowUnauthenticatedIdentities: false
+            CognitoIdentityProviders:
+                -
+                  ClientId: !Ref CognitoAppClient
+                  ProviderName: !GetAtt CognitoUserPool.ProviderName
+                  ServerSideTokenCheck: false
+
+    RoleAuthenticatedUser:
+        Type: AWS::IAM::Role
+        Metadata:
+            cfn_nag:
+                rules_to_suppress:
+                    -
+                        id: W11
+                        reason: "This wildcard is present as the authenticated cognito role needs to be able to access contents within the bucket!"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: "Allow"
+                        Principal:
+                            Federated: "cognito-identity.amazonaws.com"
+                        Action: "sts:AssumeRoleWithWebIdentity"
+                        Condition:
+                            StringEquals:
+                                cognito-identity.amazonaws.com:aud: !Ref CognitoIdentityPool
+                            ForAnyValue:StringLike:
+                                cognito-identity.amazonaws.com:amr: "authenticated"
+            Path: /
+            Policies:
+                -
+                    PolicyName: !Sub [
+                        "${x0}-cognito-auth-user", {
+                            x0: !FindInMap [
+                                "Solution",
+                                "Project",
+                                "LowerCaseId"
+                            ]
+                        }
+                    ]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            ## Cognito
+                            -
+                                Effect: "Allow"
+                                Action: "cognito-identity:GetId"
+                                Resource: !Sub "arn:aws:cognito-identity:${AWS::Region}:${AWS::AccountId}:identitypool/${CognitoIdentityPool}"
+                            ## API Gateway
+                            -
+                                Effect: "Allow"
+                                Action: "execute-api:Invoke"
+                                Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*/*"
+                            ## S3
+                            -
+                                Effect: "Allow"
+                                Action:
+                                    - "s3:GetObject"
+                                    - "s3:PutObject"
+                                    - "s3:ListBucket"
+                                Resource:
+                                    - !Sub "arn:aws:s3:::${BucketSource}"
+                                    - !Sub "arn:aws:s3:::${BucketSource}/*"
+
+    CognitoIdentityPoolRoleAttachment:
+        Type: AWS::Cognito::IdentityPoolRoleAttachment
+        Properties:
+            IdentityPoolId: !Ref CognitoIdentityPool
+            Roles:
+                authenticated: !GetAtt RoleAuthenticatedUser.Arn
+
+    # (Custom Resource) create coginto user
+    # Returns:
+    #   * Username
+    #   * Status
+    CognitoRegisterUser:
+        DependsOn: PostCreateSolutionManifest
+        Type: Custom::CognitoRegisterUser
+        Properties:
+            ServiceToken: !GetAtt LambdaCustomResource.Arn
+            Data:
+                UserPoolId: !Ref CognitoUserPool
+                Email: !Ref Email
+
+    ########### TODO ####################
+    ########### TODO ####################
+
+Outputs:
+    # Layers
+    LayerImageUtilsArn:
+        Value: !Ref LayerImageUtils
+        Description: Lambda Layer (ImageUtils)
+    # Custom Resource
+    RoleCustomResourceArn:
+        Value: !GetAtt RoleCustomResource.Arn
+        Description: IAM Role Arn (Custom Resource)
+    LambdaCustomResourceArn:
+        Value: !GetAtt LambdaCustomResource.Arn
+        Description: Lambda Arn (Custom Resource)
+    ## Buckets
+    BucketLogs:
+        Value: !Ref BucketLogs
+        Description: Bucket (Logs)
+    BucketSource:
+        Value: !Ref BucketSource
+        Description: Bucket (Source)
+    BucketWeb:
+        Value: !Ref BucketWeb
+        Description: Bucket (Web)
+    ## API Gateway
+    LambdaApiArn:
+        Value: !GetAtt LambdaApi.Arn
+        Description: Lambda Arn (POST request)
+    LambdaApiSmallArn:
+        Value: !GetAtt LambdaApiSmall.Arn
+        Description: Lambda Arn (GET and OPTIONS requests)
+    RoleApiArn:
+        Value: !GetAtt RoleApi.Arn
+        Description: IAM Role Arn (API Lambda)
+    RestApiId:
+        Value: !Ref RestApi
+        Description: API Id
+    RestApiEndpoint:
+        Value: !Sub [
+            "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${x0}", {
+                x0: !FindInMap [
+                    "Solution",
+                    "APIGateway",
+                    "StageName"
+                ]
+            }
+        ]
+        Description: API Endpoint
+    ## Cognito related
+    CognitoUserPoolId:
+        Value: !Ref CognitoUserPool
+        Description: "User Pool ID (Cognito)"
+    CognitoUserPoolArn:
+        Value: !GetAtt CognitoUserPool.Arn
+        Description: "User Pool Arn (Cognito)"
+    CognitoUserPoolProviderName:
+        Value: !GetAtt CognitoUserPool.ProviderName
+        Description: "User Pool Provider Name (Cognito)"
+    CognitoUserPoolProviderURL:
+        Value: !GetAtt CognitoUserPool.ProviderURL
+        Description: "User Pool Provider Url (Cognito)"
+    CognitoAppClientId:
+        Value: !Ref CognitoAppClient
+        Description: "App Client ID (Cognito)"
+    CognitoIdentityPoolId:
+        Value: !Ref CognitoIdentityPool
+        Description: "Identity Pool (Cognito)"
+    CognitoIdentityPoolName:
+        Value: !GetAtt CognitoIdentityPool.Name
+        Description: "Identity Pool Name (Cognito)"
+    CognitoRegisterUser:
+        Value: !GetAtt CognitoRegisterUser.Username
+        Description: "Registered Username (Cognito)"
+    RoleAuthenticatedUserArn:
+        Value: !GetAtt RoleAuthenticatedUser.Arn
+        Description: IAM Role Arn (Cognito Authenticated User)
+    ## WebApp related
+    CloudFrontDistributionId:
+        Value: !Ref CloudFrontDistribution
+        Description: Id (CloudFront Distribution)
+    DemoPortal:
+        Value: !Sub https://${CloudFrontDistribution.DomainName}
+        Description: "Demo Portal (WebApp)"
+    CustomLabelsProjectArn:
+        Value: !GetAtt CreateCustomLabelsProject.Arn
+        Description: Project Arn (Amazon Rekognition Custom Labels)

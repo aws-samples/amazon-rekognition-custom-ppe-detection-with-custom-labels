@@ -1,0 +1,23 @@
+{
+  "name": "custom-ppe-detection-custom-resources",
+  "version": "0.0.1",
+  "description": "custom resource to create resource for custom ppe detection demo with Amazon Rekognition Custom Labels and Label detections.",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "pretest": "npm install",
+    "test": "mocha *.spec.js",
+    "build:clean": "rm -rf dist && mkdir -p dist",
+    "build:copy": "cp -rv index.js package.json lib dist/",
+    "build:install": "cd dist && npm install --production",
+    "build": "npm-run-all -s build:clean build:copy build:install",
+    "zip": "cd dist && zip -rq"
+  },
+  "author": "aws-specialist-sa-emea",
+  "license": "MIT-0",
+  "dependencies": {
+    "adm-zip": "^0.4.14",
+    "mime": "^2.4.5"
+  },
+  "devDependencies": {}
+}

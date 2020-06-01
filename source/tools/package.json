@@ -1,0 +1,16 @@
+{
+  "name": "cli-tools",
+  "version": "1.0.0",
+  "description": "command tools",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "aws-sdk": "^2.683.0",
+    "glob": "^7.1.6",
+    "jimp": "^0.12.1"
+  },
+  "scripts": {},
+  "author": "aws-specialist-sa-emea",
+  "license": "MIT-0",
+  "devDependencies": {}
+}
