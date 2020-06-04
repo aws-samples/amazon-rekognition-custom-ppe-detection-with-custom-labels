@@ -49,7 +49,7 @@ function parseCmdline() {
       return usage('\'--html\' must be specified');
     }
   } else {
-    return usage(`command \'${command}\' not supported`);
+    return usage(`command '${command}' not supported`);
   }
   options.command = command;
   return options;
@@ -61,16 +61,16 @@ async function injectSRICommand(options) {
   const output = [];
   const rootDir = PATH.parse(original).dir;
   const lines = buffer.toString().split('\n');
-  while(lines.length) {
+  while (lines.length) {
     const line = lines.shift();
     if (line.indexOf('%SRI%') < 0) {
       output.push(line);
       continue;
     }
     if (line.indexOf('<script') >= 0) {
-      output.push(insertSRI(line, rootDir, /src=\"([^"]+)\"/));
+      output.push(insertSRI(line, rootDir, /src="([^"]+)"/));
     } else if (line.indexOf('<link') >= 0) {
-      output.push(insertSRI(line, rootDir, /href=\"([^"]+)\"/));
+      output.push(insertSRI(line, rootDir, /href="([^"]+)"/));
     } else {
       throw new Error('only support <script> and <link> tags');
     }
@@ -82,14 +82,14 @@ async function injectSRICommand(options) {
 async function minifyJSCommand(options) {
   let parsed = PATH.parse(PATH.resolve(options.dir));
   if (parsed.ext.length > 0) {
-    parsed = parsed.dir
+    parsed = parsed.dir;
   } else {
     parsed = PATH.join(parsed.dir, parsed.base);
   }
 
   const files = await new Promise((resolve, reject) =>
     GLOB(PATH.join(parsed, '**/*.js'), (e, data) =>
-      (e) ? reject(e) : resolve(data)));
+      ((e) ? reject(e) : resolve(data))));
 
   files.forEach((file) => {
     console.log(`>>> processing ${file}...`);
@@ -118,25 +118,28 @@ function insertSRI(line, rootDir, regex) {
   }
   const idx = line.indexOf('>');
   if (idx < 0) {
-    throw new Error('failed to find \'>\' enclose tag: ${line}');
+    throw new Error(`failed to find '>' enclose tag: ${line}`);
   }
 
   const path = PATH.resolve(PATH.join(rootDir, found[1]));
   const integrity = computeFileSHA384(path);
   return [
     line.substring(0, idx),
-    ` integrity=\"sha384-${integrity}\"`,
+    ` integrity="sha384-${integrity}"`,
     line.substring(idx),
   ].join('');
 }
 
 function createBackupCopy(path) {
-  const buffer = FS.readFileSync(path);
-  // FS.writeFileSync(`${path}.bak`, buffer);
-  return buffer;
+  return FS.readFileSync(path);
 }
 
 (async () => {
+  process.on('uncaughtException', (e) => {
+    console.error('There was an uncaught error', e);
+    process.exit(1);
+  });
+
   const options = parseCmdline();
   if (options.command === COMMAND.MINIFY) {
     return minifyJSCommand(options);
