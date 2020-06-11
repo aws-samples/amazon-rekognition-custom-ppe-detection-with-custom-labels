@@ -2,15 +2,15 @@
 
 If you are looking for pre-trained Personal Protective Equipment (PPE) detection APIs, please visit our[Amazon Rekognition PPE](https://aws.amazon.com/rekognition/) APIs.
 
-This demo solution demonstrate how you can train a custom model to detect a specific PPE requirement, **High Visibility Safety Vest**. It uses a combination of [Amazon Rekognition Labels Detection](https://docs.aws.amazon.com/rekognition/latest/dg/labels.html) and [Amazon Rekognition Custom Labels](https://aws.amazon.com/rekognition/custom-labels-features/) to prepare and train a model to identify an individual who is wearing a vest or not.
+This demo solution demonstrates how to train a custom model to detect a specific PPE requirement, **High Visibility Safety Vest**. It uses a combination of [Amazon Rekognition Labels Detection](https://docs.aws.amazon.com/rekognition/latest/dg/labels.html) and [Amazon Rekognition Custom Labels](https://aws.amazon.com/rekognition/custom-labels-features/) to prepare and train a model to identify an individual who is wearing a vest or not.
 
-It consists of two main workflows: **Training** and **Analysis** where the former helps you to prepare dataset, train and run a Custom Labels model; the latter provides an easy way to analyze images using the model. The solution also provides a simple web interface to guide you through both training and analysis processes.
+It consists of two main workflows: **Training** and **Analysis**. The former helps you to prepare dataset, train and run a Custom Labels model; the latter provides an easy way to analyze images using the model. The solution also provides a simple web interface to guide you through both training and analysis processes.
 
 __
 
 ## Training Workflow
 
-The Training workflow provides an easy way to prepare dataset, create, and train your own Custom Labels model. The Custom Labels model uses [Image-level Labels](https://docs.aws.amazon.com/rekognition/latest/customlabels-dg/rv-assign-labels.html) where we assign an image (a person) to either a **vest** or **novest** label to indicate an individual is wearing a _High Visibility Safety vest_ or not.
+The Training workflow provides an easy way to prepare dataset, create, and train your own Custom Labels model. The Custom Labels model uses [Image-level Labels](https://docs.aws.amazon.com/rekognition/latest/customlabels-dg/rv-assign-labels.html) where we assign an image (a person in our case) to either a **vest** or **novest** label to indicate a person is wearing a _Safety vest_ or not.
 
 The web interface exposes _two_ options to prepare and train your first Custom Label model.
 
@@ -18,21 +18,21 @@ __
 
 ### Option 1: Prepare and train with unstructured images
 
-This option allows you drag and drop images that have not been catorized/labeled; for instance, a large crowd in an image or multiple people within an image. This option first uses Amazon Rekognition Labels Detection to obtain bounding boxes of each person's coordinate and crop the person within the image and then prepares the data for you to label. The animated GIF below demonstrates the steps to prepare the training dataset. Once the preparation is done, use Option 2 (described below) to upload and train your Custom Labels model.
+This option allows you drag and drop images that have not been categorized/labeled; for instance, an image with a large crowd. This option first uses Amazon Rekognition Labels Detection to obtain bounding boxes of each person's coordinate and to crop the person within the image.  Then it prepares the dataset (cropped images) for you to label. The animated GIF below demonstrates the steps to prepare the training dataset. Once the preparation is done, use Option 2 (described below) to upload and train a Custom Labels model.
 
 ![Training with unstructured images](./deployment/images/training-option-1.gif)
 
 __
 
 ### Option 2: Prepare and train Custom Labels with structured/labeled images
-If you have already prepared your training dataset (people already cropped and labeled), choose this option to upload your labeled training dataset by drag and drop person who wears **vest** to the **vest area** and person who doesn't wear vest to the **novest area**. Then, create and train a Custom Labels model. The animated GIF below demonstrates the steps.
+If you have already prepared your training dataset (people already cropped and labeled), choose this option to upload your training dataset by drag and drop images where people wear **vest** to the **vest area** and people who don't wear vest to the **novest area**. Then, create and train a Custom Labels model. The animated GIF below demonstrates the steps.
 
 ![Training with structured, labeled images](./deployment/images/training-option-2.gif)
 
 __
 
 ## Analysis Workflow
-Once your Custom Labels model is trained and is running, you can start analyzing image(s) by dropping images into the web portal. The analysis process is designed to run concurrently; thus, you can drop one image or a collection of images at once. See the animated GIF below:
+Once the Custom Labels model is trained and is running, you can start analyzing image(s) by dropping images into the web portal. The analysis process is designed to run concurrently; thus, you can drop one image or a collection of images at once. See the animated GIF below:
 
 ![Analyzing images with your Custom Labels model](./deployment/images/analysis.gif)
 
@@ -65,7 +65,7 @@ User first signs in to the web portal using Amazon Cognito service. The web appl
 
 Upon sign-in, the user is authenticated and is given a temporary security credential to access limited AWS resources such as permission to call a specific Amazon API Gateway endpoint and permission to upload images to a specific Amazon Simple Storage Service (S3) bucket, the **source bucket**. The source S3 bucket is configured to take advantage of [Amazon S3 Transfer Acceleration](https://docs.aws.amazon.com/AmazonS3/latest/dev/transfer-acceleration.html).
 
-The training and analysis workflows can only be accessed through Amazon API Gateway endpoint where the incoming requestes are authenticated with AWS_IAM, the temporary security credential. The API endpoint invokes a lambda function to handle the training and analysis requests.
+The training and analysis workflows can only be accessed through Amazon API Gateway endpoint where the incoming requests are authenticated with AWS_IAM, the temporary security credential. The API endpoint invokes a lambda function to process the api requests.
 
 An Amazon S3 logs bucket is created to store access logs from Amazon S3 buckets and Amazon CloudFront distribution.
 
@@ -76,9 +76,9 @@ Learn more about the implementation of:
 
 ___
 
-# Launch solution with Pre-built AWS CloudFormation Template
+# Launching solution with Pre-built AWS CloudFormation Template
 
-The solution is deployed using an AWS CloudFormation template with AWS Lambda backed custom resources. Follow the instructions below to deploy the solution. To deploy this solution use one of the following CloudFormation templates and follows the instructions.
+The solution is deployed using an AWS CloudFormation template with AWS Lambda backed custom resources. To deploy this solution, use one of the following CloudFormation templates and follows the instructions.
 
 | AWS Region | AWS CloudFormation Template URL |
 |:-----------|:----------------------------|
@@ -183,10 +183,10 @@ Make sure you see the following files under **/custom-ppe-detection/1.0.0/**
 
 | Name | Description |
 |:---  |:------------|
-| custom-ppe-detection.template | cloudformation templates and shell scripts |
-| custom-ppe-detection-custom-resources-1.0.0.zip | a custom resource lambda function used by cloudformation template |
-| custom-ppe-detection-api-1.0.0.zip | a package of a lambda function to manage GET, POST, and OPTIONS requests from Amazon API Gateway |
-| custom-ppe-detection-layer-image-utils-1.0.0.zip | a package of a lambda layer used by the api lambda |
+| custom-ppe-detection.template | the main cloudformation templates |
+| custom-ppe-detection-custom-resources-1.0.0.zip | a package of custom resource lambda code used by cloudformation template |
+| custom-ppe-detection-api-1.0.0.zip | a package of a lambda code to process GET, POST, and OPTIONS requests from Amazon API Gateway |
+| custom-ppe-detection-layer-image-utils-1.0.0.zip | a package of a lambda layer used by the api lambda function |
 | custom-ppe-detection-webapp-1.0.0.zip | a package of the webapp code |
 
 ___
@@ -346,10 +346,13 @@ The solution uses the following AWS resources:
   * IAM Roles for the custom resource and the Lambda function
 * [AWS CloudFormation](https://aws.amazon.com/cloudformation/)
 
-## Datasets
-Demo videos shown in this README and the training and testing datasets are using images downloaded from [pexels.com](https://www.pexels.com/) and [unsplash.com](https://unsplash.com/).
+___
 
-Also check out our pre-trained [Amazon Rekognition PPE](https://aws.amazon.com/rekognition/) APIs.
+# Attributions
+Images and videos used in this README and training and testing datasets are courtesy of [pexels.com](https://www.pexels.com/) and [unsplash.com](https://unsplash.com/).
+
+* [Pexels License](https://www.pexels.com/license/)
+* [Unsplash License](https://unsplash.com/license)
 
 ___
 

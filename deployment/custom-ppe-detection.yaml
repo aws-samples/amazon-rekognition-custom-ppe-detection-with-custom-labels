@@ -706,7 +706,7 @@ Resources:
                     ]
                 }
             ]
-            LicenseInfo: Apache-2.0
+            LicenseInfo: MIT-0
 
     LambdaApi:
         Type: AWS::Lambda::Function
