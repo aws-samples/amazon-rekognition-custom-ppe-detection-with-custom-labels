@@ -10,11 +10,6 @@ exports.handler = async (event, context) => {
     context = ${JSON.stringify(context, null, 2)}`);
 
   const request = new ApiRequest(event, context);
-  const supported = request.opSupported();
-  if (!supported) {
-    return request.onError(new Error('op not supported'));
-  }
-
   if (request.method === ApiRequest.Methods.OPTIONS) {
     return request.onOPTIONS().catch(e =>
       request.onError(e));

@@ -25,14 +25,11 @@ class ApiRequest extends mxValidation(class {}) {
     this.$cognitoIdentityId = (identity)
       ? decodeURIComponent(identity)
       : undefined;
-    if (this.$cognitoIdentityId && !this.testCognitoIdentityId(this.$cognitoIdentityId)) {
-      throw new Error('invalid user id');
-    }
 
     try {
       this.$body = JSON.parse(this.$event.body);
     } catch (e) {
-      this.$body = this.$event.body;
+      this.$body = {};
     }
   }
 
@@ -128,13 +125,20 @@ class ApiRequest extends mxValidation(class {}) {
   opSupported() {
     const op = (this.pathParameters || {}).operation;
     if (!this.testOperation(op)) {
-      throw new Error('operation not supported');
+      return false;
     }
     return !!(Object.values(ApiRequest.Operations)
       .find(x => x === op));
   }
 
+  validateIdentity() {
+    return !(this.cognitoIdentityId && !this.testCognitoIdentityId(this.cognitoIdentityId));
+  }
+
   async onOPTIONS() {
+    if (!this.validateIdentity()) {
+      throw new Error('invalid user id');
+    }
     if (!this.opSupported()) {
       throw new Error('operation not supported');
     }
@@ -142,6 +146,9 @@ class ApiRequest extends mxValidation(class {}) {
   }
 
   async onGET() {
+    if (!this.validateIdentity()) {
+      throw new Error('invalid user id');
+    }
     if (!this.opSupported()) {
       throw new Error('operation not supported');
     }
@@ -162,6 +169,9 @@ class ApiRequest extends mxValidation(class {}) {
   }
 
   async onPOST() {
+    if (!this.validateIdentity()) {
+      throw new Error('invalid user id');
+    }
     if (!this.opSupported()) {
       throw new Error('operation not supported');
     }
