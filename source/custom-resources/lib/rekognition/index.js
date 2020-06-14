@@ -7,6 +7,64 @@ const {
 
 class X0 extends mxBaseResponse(class {}) {}
 
+async function findProject(projectName) {
+  let response;
+  const rekog = new AWS.Rekognition({
+    apiVersion: '2016-06-27',
+  });
+  do {
+    response = await rekog.describeProjects({
+      MaxResults: 20,
+      NextToken: (response || {}).NextToken,
+    }).promise();
+
+    const project = response.ProjectDescriptions.find(x =>
+      x.ProjectArn.split('/')[1] === projectName);
+    if (project) {
+      return project;
+    }
+  } while ((response || {}).NextToken);
+  return undefined;
+}
+
+async function createProject(projectName) {
+  const rekog = new AWS.Rekognition({
+    apiVersion: '2016-06-27',
+  });
+  return rekog.createProject({
+    ProjectName: projectName,
+  }).promise().catch((e) => {
+    if (e.code === 'ResourceAlreadyExistsException') {
+      return findProject(projectName);
+    }
+    throw e;
+  });
+}
+
+async function stopProjectVersions(projectName) {
+  const project = await findProject(projectName);
+  if (!project) {
+    return undefined;
+  }
+
+  let response;
+  const rekog = new AWS.Rekognition({
+    apiVersion: '2016-06-27',
+  });
+  do {
+    response = await rekog.describeProjectVersions({
+      ProjectArn: project.ProjectArn,
+      MaxResults: 20,
+      NextToken: (response || {}).NextToken,
+    }).promise();
+    await Promise.all(response.ProjectVersionDescriptions.map(x =>
+      rekog.stopProjectVersion({
+        ProjectVersionArn: x.ProjectVersionArn,
+      }).promise().catch(e => e)));
+  } while ((response || {}).NextToken);
+  return response;
+}
+
 /**
  * @function CreateCustomLabelsProject
  * @param {object} event
@@ -19,21 +77,15 @@ exports.CreateCustomLabelsProject = async (event, context) => {
     if (!data.ProjectName) {
       throw new Error('ProjectName must be defined');
     }
+    x0.storeResponseData('Name', data.ProjectName);
 
-    const params = {
-      ProjectName: data.ProjectName,
-    };
-    x0.storeResponseData('Name', params.ProjectName);
     if (x0.isRequestType('Create')) {
-      const instance = new AWS.Rekognition({
-        apiVersion: '2016-06-27',
-      });
-      const response = await instance.createProject(params).promise().catch((e) => {
-        if (e.code !== 'ResourceAlreadyExistsException') {
-          throw e;
-        }
-      });
+      const response = await createProject(data.ProjectName);
       x0.storeResponseData('Arn', response.ProjectArn);
+      x0.storeResponseData('Status', 'SUCCESS');
+    } else if (x0.isRequestType('Delete')) {
+      // stop any running models
+      await stopProjectVersions(data.ProjectName);
       x0.storeResponseData('Status', 'SUCCESS');
     } else {
       x0.storeResponseData('Status', 'SKIPPED');
