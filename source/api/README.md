@@ -69,7 +69,7 @@ The response is list of ProjectVersionDescriptions returned from [Amazon Rekogni
     "Status": "TRAINING_IN_PROGRESS",
     "StatusMessage": "The model is being trained.",
     "OutputConfig": {
-      "S3Bucket": "ml9800-<guid>-source",
+      "S3Bucket": "ml9800-<guid>-<account>-<region>-source",
       "S3KeyPrefix": "evaluation/ml9800-<guid>-custom-ppe-detection/<datetime>/manifests/output"
     },
     "TrainingDataResult": {
@@ -78,7 +78,7 @@ The response is list of ProjectVersionDescriptions returned from [Amazon Rekogni
           {
             "GroundTruthManifest": {
               "S3Object": {
-                "Bucket": "ml9800-<guid>-source",
+                "Bucket": "ml9800-<guid>-<account>-<region>-source",
                 "Name": "datasets/ml9800-<guid>-custom-ppe-detection/<datetime>/manifests/output/output.manifest"
               }
             }
@@ -122,7 +122,7 @@ The request is sent to the lambda function where it calls [Amazon Rekognition Cr
   "arn": "arn:aws:rekognition:<region>:<account>:project/ml9800-<guid>-custom-ppe-detection/<datetime>",
   "action": "create",
   "training": {
-    "bucket": "ml9800-<guid>-source",
+    "bucket": "ml9800-<guid>-<account>-<region>-source",
     "key": "datasets/ml9800-<guid>-custom-ppe-detection/<datetime>/manifests/output/output.manifest"
   },
   "testing": {
@@ -268,7 +268,7 @@ The request is sent to the lambda function where it calls [Amazon Rekognition De
 
 ```json
 {
-  "bucket": "ml9800-<guid>-source",
+  "bucket": "ml9800-<guid>-<account>-<region>-source",
   "key": "file-75458384/photo-4429302.jpeg"
 }
 ```
@@ -333,7 +333,7 @@ The request is sent to the lambda function where it calls [Amazon Rekognition De
 
 ```json
 {
-  "bucket": "ml9800-<guid>-source",
+  "bucket": "ml9800-<guid>-<account>-<region>-source",
   "key": "file-75458384/photo-4429302.jpeg"
 }
 ```
@@ -446,8 +446,8 @@ The authenicated user is given access to **invoke** the RESTful API endpoint and
                 "s3:ListBucket"
             ],
             "Resource": [
-                "arn:aws:s3:::ml9800-<guid>-source",
-                "arn:aws:s3:::ml9800-<guid>-source/*"
+                "arn:aws:s3:::ml9800-<guid>-<account>-<region>-source",
+                "arn:aws:s3:::ml9800-<guid>-<account>-<region>-source/*"
             ],
             "Effect": "Allow"
         }
@@ -480,7 +480,7 @@ The lambda function that processes the training and analysis workflows is given 
         },
         {
             "Action": "s3:ListBucket",
-            "Resource": "arn:aws:s3:::ml9800-<guid>-<region>-source",
+            "Resource": "arn:aws:s3:::ml9800-<guid>-<account>-<region>-source",
             "Effect": "Allow"
         },
         {
@@ -491,7 +491,7 @@ The lambda function that processes the training and analysis workflows is given 
                 "s3:GetObjectTagging",
                 "s3:PutObject"
             ],
-            "Resource": "arn:aws:s3:::ml9800-<guid>-<region>-source/*",
+            "Resource": "arn:aws:s3:::ml9800-<guid>-<account>-<region>-source/*",
             "Effect": "Allow"
         },
         {
@@ -537,5 +537,5 @@ The lambda function that processes the training and analysis workflows is given 
 
 ___
 
-Back to [README](../../README.md)
+Next to [Webapp component](../webapp/README.md) | Return to [README](../../README.md)
 

@@ -51,35 +51,13 @@ The custom resource is given a set of permission to access specific resources.
             "Effect": "Allow"
         },
         {
-            "Action": [
-                "cognito-idp:AdminCreateUser",
-                "cognito-idp:AdminUpdateUserAttributes",
-                "cognito-idp:CreateGroup",
-                "cognito-idp:CreateUserPool",
-                "cognito-idp:CreateUserPoolClient",
-                "cognito-idp:DeleteGroup",
-                "cognito-idp:DeleteUserPool",
-                "cognito-idp:DeleteUserPoolClient",
-                "cognito-idp:DescribeUserPool",
-                "cognito-idp:DescribeUserPoolClient",
-                "cognito-idp:UpdateUserPool",
-                "cognito-idp:UpdateUserPoolClient"
-            ],
+            "Action": "cognito-idp:AdminCreateUser",
             "Resource": "arn:aws:cognito-idp:<region>:<account>:userpool/*",
             "Effect": "Allow"
         },
         {
-            "Action": [
-                "cognito-idp:CreateUserPoolDomain",
-                "cognito-idp:DeleteUserPoolDomain",
-                "cognito-idp:DescribeUserPoolDomain"
-            ],
-            "Resource": "*",
-            "Effect": "Allow"
-        },
-        {
             "Action": "iam:PassRole",
-            "Resource": "*",
+            "Resource": "arn:aws:iam::<account>:role/ml9800/<stack-name>-RoleCustomResource-*",
             "Effect": "Allow"
         },
         {
@@ -130,7 +108,7 @@ Here is an example of the Bucket policy being created by the solution
             "Effect": "Deny",
             "Principal": "*",
             "Action": "*",
-            "Resource": "arn:aws:s3:::ml9800-<guid>-<region>-web/*",
+            "Resource": "arn:aws:s3:::ml9800-<guid>-<account>-<region>-web/*",
             "Condition": {
                 "Bool": {
                     "aws:SecureTransport": "false"
@@ -143,7 +121,7 @@ Here is an example of the Bucket policy being created by the solution
                 "AWS": "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity <GUID>"
             },
             "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::ml9800-<guid>-<region>-web/*"
+            "Resource": "arn:aws:s3:::ml9800-<guid>-<account>-<region>-web/*"
         }
     ]
 }
@@ -155,5 +133,5 @@ The **Deny** clause with **aws:SecureTransport** condition adds an extra layer o
 
 ___
 
-Back to [README](../../README.md)
+Back to [Webapp component](../webapp/README.md) | Return to [README](../../README.md)
 

@@ -27,5 +27,5 @@ HTTPS requests requires [AWS Signature V4](https://docs.aws.amazon.com/general/l
 
 ___
 
-Back to [README](../../README.md)
+Next to [Custom resources component](../custom-resources/README.md) | Back to [RESTful API, training and analysis components](../api/README.md) | Return to [README](../../README.md)
 
