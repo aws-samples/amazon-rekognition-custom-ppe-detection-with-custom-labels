@@ -92,7 +92,15 @@ Resources:
                         Action: "sts:AssumeRole"
                         Principal:
                             Service: "lambda.amazonaws.com"
-            Path: /
+            Path: !Sub [
+                "/${x0}/", {
+                    x0: !FindInMap [
+                        "Solution",
+                        "Project",
+                        "LowerCaseId"
+                    ]
+                }
+            ]
             Policies:
                 -
                     PolicyName: !Sub [
@@ -190,40 +198,79 @@ Resources:
                         ## Cognito
                         -
                             Effect: "Allow"
-                            # permission to create/update/delete user
-                            Action:
-                                - "cognito-idp:AdminCreateUser"
-                                - "cognito-idp:AdminUpdateUserAttributes"
-                                - "cognito-idp:CreateGroup"
-                                - "cognito-idp:CreateUserPool"
-                                - "cognito-idp:CreateUserPoolClient"
-                                - "cognito-idp:DeleteGroup"
-                                - "cognito-idp:DeleteUserPool"
-                                - "cognito-idp:DeleteUserPoolClient"
-                                - "cognito-idp:DescribeUserPool"
-                                - "cognito-idp:DescribeUserPoolClient"
-                                - "cognito-idp:UpdateUserPool"
-                                - "cognito-idp:UpdateUserPoolClient"
-                            # This wildcard is present as cognito userpool yet to be created.
+                            Action: "cognito-idp:AdminCreateUser"
                             Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+                        # IAM - required by AdminCreateUser
                         -
                             Effect: "Allow"
-                            Action:
-                                - "cognito-idp:CreateUserPoolDomain"
-                                - "cognito-idp:DeleteUserPoolDomain"
-                                - "cognito-idp:DescribeUserPoolDomain"
-                            Resource: !Join ["", ["*"]]
-                        ## IAM
-                        -
-                            Effect: "Allow"
-                            # allow custom resource to pass IAM role during cognito.CreateGroup
                             Action: "iam:PassRole"
-                            Resource: !Join ["", ["*"]]
+                            Resource: !Sub [
+                                "arn:aws:iam::${AWS::AccountId}:role/${x0}/${AWS::StackName}-RoleCustomResource-*", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Project",
+                                        "LowerCaseId"
+                                    ]
+                                }
+                            ]
                         ## Rekognition
                         -
                             Effect: "Allow"
-                            Action: "rekognition:CreateProject"
-                            Resource: !Sub "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/*/*"
+                            Action: "rekognition:DescribeProjects"
+                            ## Note: a wildcard is required for DescribeProjects, see https://docs.aws.amazon.com/IAM/latest/UserGuide/list_amazonrekognition.html#amazonrekognition-project
+                            Resource: !Join ["", ["*"]]
+                        -
+                            Effect: "Allow"
+                            Action:
+                                - "rekognition:CreateProject"
+                                - "rekognition:DescribeProjectVersions"
+                            Resource: !Sub [
+                                "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${x0}-${x1}-custom-ppe-detection/*", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Project",
+                                        "LowerCaseId"
+                                    ],
+                                    x1: !Select [
+                                        4,
+                                        !Split [
+                                            "-",
+                                            !Select [
+                                                2,
+                                                !Split [
+                                                    "/",
+                                                    !Sub "${AWS::StackId}"
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                }
+                            ]
+                        -
+                            Effect: "Allow"
+                            Action: "rekognition:StopProjectVersion"
+                            Resource: !Sub [
+                                "arn:aws:rekognition:${AWS::Region}:${AWS::AccountId}:project/${x0}-${x1}-custom-ppe-detection/version/*/*", {
+                                    x0: !FindInMap [
+                                        "Solution",
+                                        "Project",
+                                        "LowerCaseId"
+                                    ],
+                                    x1: !Select [
+                                        4,
+                                        !Split [
+                                            "-",
+                                            !Select [
+                                                2,
+                                                !Split [
+                                                    "/",
+                                                    !Sub "${AWS::StackId}"
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                }
+                            ]
 
     LambdaCustomResource:
         Type: AWS::Lambda::Function
@@ -321,7 +368,7 @@ Resources:
         UpdateReplacePolicy: Retain
         Properties:
             BucketName: !Sub [
-                "${x0}-${x1}-${AWS::Region}-logs", {
+                "${x0}-${x1}-${AWS::AccountId}-${AWS::Region}-logs", {
                     x0: !FindInMap [
                         "Solution",
                         "Project",
@@ -350,7 +397,7 @@ Resources:
             AccessControl: LogDeliveryWrite
             LoggingConfiguration:
                 DestinationBucketName: !Sub [
-                    "${x0}-${x1}-${AWS::Region}-logs", {
+                    "${x0}-${x1}-${AWS::AccountId}-${AWS::Region}-logs", {
                         x0: !FindInMap [
                             "Solution",
                             "Project",
@@ -413,7 +460,7 @@ Resources:
         UpdateReplacePolicy: Retain
         Properties:
             BucketName: !Sub [
-                "${x0}-${x1}-${AWS::Region}-source", {
+                "${x0}-${x1}-${AWS::AccountId}-${AWS::Region}-source", {
                     x0: !FindInMap [
                         "Solution",
                         "Project",
@@ -595,9 +642,9 @@ Resources:
                             ## S3
                             -
                                 Effect: Allow
-                                ## note: Custom Labels requires this.
+                                ## Note: Custom Labels requires this. A wildcard is required for ListAllMyBuckets, see https://docs.aws.amazon.com/IAM/latest/UserGuide/list_amazons3.html
                                 Action: "s3:ListAllMyBuckets"
-                                Resource: "arn:aws:s3:::*"
+                                Resource: !Join ["", ["arn:aws:s3:::", "*"]]
                             -
                                 Effect: Allow
                                 Action: "s3:ListBucket"
@@ -615,7 +662,8 @@ Resources:
                             -
                                 Effect: Allow
                                 Action: "rekognition:DetectLabels"
-                                Resource: "*"
+                                ## Note: a wildcard is required for DetectLabels, see https://docs.aws.amazon.com/IAM/latest/UserGuide/list_amazonrekognition.html
+                                Resource: !Join ["", ["*"]]
                             -
                                 Effect: Allow
                                 Action: "rekognition:DetectCustomLabels"
@@ -629,7 +677,8 @@ Resources:
                             -
                                 Effect: Allow
                                 Action: "rekognition:DescribeProjects"
-                                Resource: "*"
+                                ## Note: a wildcard is required for DescribeProjects, see https://docs.aws.amazon.com/IAM/latest/UserGuide/list_amazonrekognition.html
+                                Resource: !Join ["", ["*"]]
                             -
                                 Effect: Allow
                                 Action: "rekognition:DescribeProjectVersions"
@@ -1119,7 +1168,7 @@ Resources:
         UpdateReplacePolicy: Retain
         Properties:
             BucketName: !Sub [
-                "${x0}-${x1}-${AWS::Region}-web", {
+                "${x0}-${x1}-${AWS::AccountId}-${AWS::Region}-web", {
                     x0: !FindInMap [
                         "Solution",
                         "Project",
@@ -1304,11 +1353,11 @@ Resources:
                 CustomErrorResponses:
                     -
                         ErrorCode: 403
-                        ResponsePagePath: /index.html
+                        ResponsePagePath: /404.html
                         ResponseCode: 200
                     -
                         ErrorCode: 404
-                        ResponsePagePath: /index.html
+                        ResponsePagePath: /404.html
                         ResponseCode: 200
                 IPV6Enabled: true
                 ViewerCertificate:
