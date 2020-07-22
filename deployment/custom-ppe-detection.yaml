@@ -395,30 +395,6 @@ Resources:
                       ServerSideEncryptionByDefault:
                           SSEAlgorithm: AES256
             AccessControl: LogDeliveryWrite
-            LoggingConfiguration:
-                DestinationBucketName: !Sub [
-                    "${x0}-${x1}-${AWS::AccountId}-${AWS::Region}-logs", {
-                        x0: !FindInMap [
-                            "Solution",
-                            "Project",
-                            "LowerCaseId"
-                        ],
-                        x1: !Select [
-                            4,
-                            !Split [
-                                "-",
-                                !Select [
-                                    2,
-                                    !Split [
-                                        "/",
-                                        !Sub "${AWS::StackId}"
-                                    ]
-                                ]
-                            ]
-                        ]
-                    }
-                ]
-                LogFilePrefix: "access_logs/"
             LifecycleConfiguration:
                 Rules:
                     -
