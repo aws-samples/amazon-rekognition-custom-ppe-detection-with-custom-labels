@@ -424,8 +424,10 @@ Resources:
                     -
                         Effect: Deny
                         Principal: "*"
-                        Action: "*"
-                        Resource: !Sub "arn:aws:s3:::${BucketLogs}/*"
+                        Action: "s3:*"
+                        Resource:
+                            - !Sub "arn:aws:s3:::${BucketLogs}"
+                            - !Sub "arn:aws:s3:::${BucketLogs}/*"
                         Condition:
                             Bool:
                                 "aws:SecureTransport": false
@@ -521,8 +523,10 @@ Resources:
                     -
                         Effect: Deny
                         Principal: "*"
-                        Action: "*"
-                        Resource: !Sub "arn:aws:s3:::${BucketSource}/*"
+                        Action: "s3:*"
+                        Resource:
+                            - !Sub "arn:aws:s3:::${BucketSource}"
+                            - !Sub "arn:aws:s3:::${BucketSource}/*"
                         Condition:
                             Bool:
                                 "aws:SecureTransport": false
@@ -1238,8 +1242,10 @@ Resources:
                     -
                         Effect: Deny
                         Principal: "*"
-                        Action: "*"
-                        Resource: !Sub "arn:aws:s3:::${BucketWeb}/*"
+                        Action: "s3:*"
+                        Resource:
+                            - !Sub "arn:aws:s3:::${BucketWeb}"
+                            - !Sub "arn:aws:s3:::${BucketWeb}/*"
                         Condition:
                             Bool:
                                 "aws:SecureTransport": false
