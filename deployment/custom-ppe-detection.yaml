@@ -284,7 +284,7 @@ Resources:
                     ]
                 }
             ]
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 256
             Timeout: 900
             Handler: index.handler
@@ -696,7 +696,7 @@ Resources:
                 }
             ]
             CompatibleRuntimes:
-                - nodejs10.x
+                - nodejs14.x
             Content:
                 S3Bucket: !Sub [
                     "${x0}${x1}", {
@@ -771,7 +771,7 @@ Resources:
                     ]
                 }
             ]
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 1024
             Timeout: 900
             Handler: index.handler
@@ -842,7 +842,7 @@ Resources:
                     ]
                 }
             ]
-            Runtime: nodejs10.x
+            Runtime: nodejs14.x
             MemorySize: 256
             Timeout: 900
             Handler: index.handler
